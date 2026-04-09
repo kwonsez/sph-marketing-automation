@@ -1,0 +1,22 @@
+# 환경변수 / 비밀키
+.env
+service-account.json
+naver_session.json
+
+# 파이썬
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# 로그 / 임시 파일
+*.log
+automation.log
+*.png
+
+# IDE
+.vscode/
+.idea/
+
+# 기타
+.DS_Store

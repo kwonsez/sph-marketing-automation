@@ -1,0 +1,13 @@
+# === 기본 ===
+python-dotenv==1.2.2          # .env 파일에서 환경변수 로드
+requests==2.33.1              # HTTP 요청 (Monday.com, 네이버 광고 API)
+tzdata==2026.1                # Windows 타임존 데이터 (ZoneInfo용)
+
+# === GA4 ===
+google-analytics-data==0.21.0 # GA4 Data API
+
+# === Google Ads ===
+google-ads==30.0.0            # Google Ads API
+
+# === 네이버 블로그 스크래핑 ===
+playwright==1.58.0            # 브라우저 자동화 (네이버 블로그 통계)

@@ -1,0 +1,115 @@
+name: Weekly Marketing Report
+
+on:
+  schedule:
+    # 매주 월요일 KST 10:00 = UTC 01:00
+    - cron: "0 1 * * 1"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "대상 주차 월요일 (YYYY-MM-DD). 비워두면 지난주 자동 계산."
+        required: false
+        type: string
+      dry_run:
+        description: "Dry Run (Monday.com에 쓰지 않음)"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: Playwright 브라우저 설치
+        run: playwright install chromium --with-deps
+
+      - name: 서비스 계정 키 복원
+        run: echo '${{ secrets.GOOGLE_SA_JSON }}' > service-account.json
+
+      - name: 네이버 세션 복원
+        run: echo '${{ secrets.NAVER_SESSION_JSON }}' > naver_session.json
+
+      - name: 리포트 실행
+        env:
+          # Monday.com
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          MONDAY_WEEKLY_BOARD_ID: ${{ vars.MONDAY_WEEKLY_BOARD_ID }}
+          MONDAY_LEAD_BOARD_IDS: ${{ vars.MONDAY_LEAD_BOARD_IDS }}
+          MONDAY_COL_START_DATE: ${{ vars.MONDAY_COL_START_DATE }}
+          MONDAY_COL_LEAD_GEN: ${{ vars.MONDAY_COL_LEAD_GEN }}
+          MONDAY_COL_WAU: ${{ vars.MONDAY_COL_WAU }}
+          MONDAY_COL_CONTACT_USERS: ${{ vars.MONDAY_COL_CONTACT_USERS }}
+          MONDAY_COL_G_IMPRESSIONS: ${{ vars.MONDAY_COL_G_IMPRESSIONS }}
+          MONDAY_COL_G_CLICKS: ${{ vars.MONDAY_COL_G_CLICKS }}
+          MONDAY_COL_G_COST: ${{ vars.MONDAY_COL_G_COST }}
+          MONDAY_COL_WOW_CONVERSION: ${{ vars.MONDAY_COL_WOW_CONVERSION }}
+          MONDAY_COL_WOW_GCTR: ${{ vars.MONDAY_COL_WOW_GCTR }}
+          MONDAY_COL_N_IMPRESSIONS: ${{ vars.MONDAY_COL_N_IMPRESSIONS }}
+          MONDAY_COL_N_CLICKS: ${{ vars.MONDAY_COL_N_CLICKS }}
+          MONDAY_COL_N_COST: ${{ vars.MONDAY_COL_N_COST }}
+          MONDAY_COL_WOW_NCTR: ${{ vars.MONDAY_COL_WOW_NCTR }}
+          MONDAY_COL_N_BLOG_POSTS: ${{ vars.MONDAY_COL_N_BLOG_POSTS }}
+          MONDAY_COL_N_BLOG_VIEWS: ${{ vars.MONDAY_COL_N_BLOG_VIEWS }}
+          MONDAY_COL_WOW_NAVER: ${{ vars.MONDAY_COL_WOW_NAVER }}
+          # GA4
+          GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: ./service-account.json
+          # Google Ads
+          GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+          GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          GOOGLE_ADS_REFRESH_TOKEN: ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+          GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${{ vars.GOOGLE_ADS_LOGIN_CUSTOMER_ID }}
+          GOOGLE_ADS_CUSTOMER_ID: ${{ vars.GOOGLE_ADS_CUSTOMER_ID }}
+          # 네이버 검색광고
+          NAVER_ADS_API_KEY: ${{ secrets.NAVER_ADS_API_KEY }}
+          NAVER_ADS_SECRET_KEY: ${{ secrets.NAVER_ADS_SECRET_KEY }}
+          NAVER_ADS_CUSTOMER_ID: ${{ vars.NAVER_ADS_CUSTOMER_ID }}
+          # 네이버 블로그
+          NAVER_LOGIN_ID: ${{ secrets.NAVER_LOGIN_ID }}
+          NAVER_LOGIN_PW: ${{ secrets.NAVER_LOGIN_PW }}
+          NAVER_BLOG_ID: ${{ vars.NAVER_BLOG_ID }}
+          # Gmail
+          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_RECIPIENT: ${{ secrets.GMAIL_RECIPIENT }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            ARGS="$ARGS --date ${{ github.event.inputs.date }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python main.py $ARGS
+
+      - name: 로그 업로드 (실패 시)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: automation-log
+          path: automation.log
+          retention-days: 7
+
+      - name: 스크린샷 업로드 (실패 시)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: "*.png"
+          retention-days: 7
+          if-no-files-found: ignore

@@ -66,7 +66,15 @@ class Orchestrator:
 
         # 3. 건너뛰기 모드 (Dry Run)
         if dry_run:
-            self.logger.info(f"✨ Dry Run 완료. 수집된 데이터: {all_data}")
+            d = all_data
+            self.logger.info(
+                f"✨ Dry Run 완료 [{week_name}]\n"
+                f"  ├ GA4          WAU {d.get('wau', '-'):>6,}  |  신청문의 {d.get('contact_users', '-'):>4,}\n"
+                f"  ├ Google Ads   노출 {d.get('g_impressions', '-'):>6,}  |  클릭 {d.get('g_clicks', '-'):>4,}  |  비용 {d.get('g_cost', '-'):>7,}원\n"
+                f"  ├ Naver Ads    노출 {d.get('n_impressions', '-'):>6,}  |  클릭 {d.get('n_clicks', '-'):>4,}  |  비용 {d.get('n_cost', '-'):>7,}원\n"
+                f"  ├ Lead Gen     {d.get('lead_gen', '-')}건\n"
+                f"  └ Naver Blog   포스팅 {d.get('n_blog_posts', '-')}건  |  조회수 {d.get('n_blog_views', '-'):,}"
+            )
             return
 
         try:

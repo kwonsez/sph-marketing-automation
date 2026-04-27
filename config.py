@@ -142,7 +142,7 @@ class GmailConfig:
     """Gmail 알림 관련 설정"""
     sender: str = ""
     app_password: str = ""
-    recipient: str = ""
+    recipients: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -208,6 +208,10 @@ def load_config(skip_groups: list[str] = None) -> AppConfig:
     lead_ids_raw = os.getenv("MONDAY_LEAD_BOARD_IDS", "")
     lead_board_ids = [bid.strip() for bid in lead_ids_raw.split(",") if bid.strip()]
 
+    # GMAIL_RECIPIENT: 콤마 구분 문자열 → 리스트 (여러 명에게 발송 가능)
+    recipients_raw = os.getenv("GMAIL_RECIPIENT", "")
+    gmail_recipients = [addr.strip() for addr in recipients_raw.split(",") if addr.strip()]
+
     config = AppConfig(
         monday=MondayConfig(
             api_token=os.getenv("MONDAY_API_TOKEN", ""),
@@ -255,7 +259,7 @@ def load_config(skip_groups: list[str] = None) -> AppConfig:
         gmail=GmailConfig(
             sender=os.getenv("GMAIL_SENDER", ""),
             app_password=os.getenv("GMAIL_APP_PASSWORD", ""),
-            recipient=os.getenv("GMAIL_RECIPIENT", ""),
+            recipients=gmail_recipients,
         ),
     )
 

@@ -16,25 +16,28 @@ class GmailNotifier:
         self.logger = logging.getLogger("notifier.gmail")
         self.sender = config.sender
         self.password = config.app_password
-        self.recipient = config.recipient
+        self.recipients = config.recipients
 
     def _send_email(self, subject: str, html_content: str):
-        """SMTP를 통해 이메일을 실제로 발송한다."""
+        """SMTP를 통해 이메일을 실제로 발송한다. 수신자가 여러 명이면 모두에게 발송한다."""
         if not self.sender or not self.password:
             self.logger.warning("Gmail 설정이 누락되어 알림을 보낼 수 없습니다.")
+            return
+        if not self.recipients:
+            self.logger.warning("Gmail 수신자가 설정되지 않아 알림을 보낼 수 없습니다.")
             return
 
         msg = MIMEMultipart()
         msg["From"] = self.sender
-        msg["To"] = self.recipient
+        msg["To"] = ", ".join(self.recipients)
         msg["Subject"] = subject
         msg.attach(MIMEText(html_content, "html"))
 
         try:
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
                 server.login(self.sender, self.password)
-                server.send_message(msg)
-            self.logger.info(f"이메일 발송 완료: {subject}")
+                server.send_message(msg, to_addrs=self.recipients)
+            self.logger.info(f"이메일 발송 완료 ({len(self.recipients)}명): {subject}")
         except Exception as e:
             self.logger.error(f"이메일 발송 실패: {e}")
 

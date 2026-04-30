@@ -98,6 +98,88 @@ class GmailNotifier:
         """
         self._send_email(subject, html)
 
+    def notify_combined(self, results: list[dict]):
+        """여러 프로필 결과를 한 통의 메일로 발송한다.
+
+        Args:
+            results: Orchestrator.run()이 반환한 결과 dict 리스트.
+                     각 dict는 profile_name, week_name, success, data, item_id,
+                     was_update, error 키를 가진다.
+        """
+        if not results:
+            self.logger.warning("발송할 결과가 없습니다.")
+            return
+
+        week_name = results[0].get("week_name", "?")
+        all_success = all(r["success"] for r in results)
+        any_success = any(r["success"] for r in results)
+
+        if all_success:
+            prefix = "✅ [성공]"
+            heading = "리포트 작성 완료"
+            color = "#2e7d32"
+        elif any_success:
+            prefix = "⚠️ [일부 실패]"
+            heading = "일부 리포트 작성 실패"
+            color = "#ef6c00"
+        else:
+            prefix = "❌ [실패]"
+            heading = "리포트 작성 실패"
+            color = "#c62828"
+
+        subject = f"{prefix} {week_name} 마케팅 리포트 자동화"
+
+        sections = ""
+        for r in results:
+            sections += self._render_profile_section(r)
+
+        html = f"""
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+            <h2 style="color: {color};">📊 {heading}</h2>
+            <p><b>대상 주차:</b> {week_name}</p>
+            {sections}
+        </body>
+        </html>
+        """
+        self._send_email(subject, html)
+
+    def _render_profile_section(self, r: dict) -> str:
+        """단일 프로필 결과를 HTML 섹션으로 렌더링한다."""
+        profile = r.get("profile_name", "?")
+        if r["success"]:
+            mode = "🔄 업데이트" if r.get("was_update") else "✅ 신규 작성"
+            item_id = r.get("item_id", "")
+            id_text = f" (ID: {item_id})" if item_id else ""
+            status_html = f"<span style='color:#2e7d32;'>{mode}{id_text}</span>"
+
+            data = r.get("data") or {}
+            rows = ""
+            for key, value in data.items():
+                val_str = f"{value:,}" if isinstance(value, (int, float)) else str(value)
+                rows += (
+                    f"<tr><td style='padding:6px 10px; border:1px solid #ddd;'>{key}</td>"
+                    f"<td style='padding:6px 10px; border:1px solid #ddd;'>{val_str}</td></tr>"
+                )
+            table = (
+                "<table style='border-collapse: collapse; margin-top:8px;'>"
+                "<thead><tr style='background:#f5f5f5;'>"
+                "<th style='padding:6px 10px; border:1px solid #ddd;'>항목</th>"
+                "<th style='padding:6px 10px; border:1px solid #ddd;'>수치</th>"
+                f"</tr></thead><tbody>{rows}</tbody></table>"
+            )
+        else:
+            status_html = "<span style='color:#c62828;'>❌ 실패</span>"
+            err = r.get("error") or "알 수 없는 에러"
+            table = f"<p style='color:#c62828; margin-top:6px;'><b>에러:</b> {err}</p>"
+
+        return f"""
+        <div style="margin: 20px 0; padding: 12px; border-left: 3px solid #999;">
+            <h3 style="margin: 0 0 8px 0;">[{profile}] {status_html}</h3>
+            {table}
+        </div>
+        """
+
     def notify_duplicate(self, week_name: str):
         """중복 생성 알림을 보낸다."""
         subject = f"⚠️ [중복] {week_name} 리포트 중복 생성 알림"

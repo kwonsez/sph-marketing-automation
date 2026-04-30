@@ -9,6 +9,7 @@ import sys
 from datetime import datetime
 
 from config import load_config
+from notifiers.gmail_notifier import GmailNotifier
 from orchestrator import Orchestrator
 
 # 로그 설정
@@ -72,14 +73,36 @@ def main():
         profiles = [config.get_profile(args.report)]
 
     # 4. 각 프로필 순차 실행 (한쪽 실패해도 다른 쪽 계속)
+    # 단일 프로필이면 Orchestrator가 직접 메일 발송, 다중이면 결과 모아 한 통으로 발송
+    is_multi = len(profiles) > 1
+    results: list[dict] = []
     for profile in profiles:
         try:
             orch = Orchestrator(config, profile)
-            orch.run(target_monday=target_date, dry_run=args.dry_run)
+            result = orch.run(
+                target_monday=target_date,
+                dry_run=args.dry_run,
+                send_notification=not is_multi,
+            )
+            results.append(result)
         except Exception as e:
             log.error(
                 f"[{profile.name}] 리포트 실행 중 예외: {e}", exc_info=True,
             )
+            results.append({
+                "profile_name": profile.name,
+                "week_name": "?",
+                "success": False,
+                "data": {},
+                "item_id": None,
+                "was_update": False,
+                "error": str(e),
+            })
+
+    # 5. 다중 실행이면 통합 메일 1통 발송 (dry-run 제외)
+    if is_multi and not args.dry_run:
+        notifier = GmailNotifier(config.gmail)
+        notifier.notify_combined(results)
 
 
 if __name__ == "__main__":

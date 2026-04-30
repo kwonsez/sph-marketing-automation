@@ -33,6 +33,7 @@ MONDAY_API_URL = "https://api.monday.com/v2"
 # [보드 날짜 컬럼 목록]에서 확인 가능.
 BOARD_FILTER_COLUMN_OVERRIDES: dict[str, str] = {
     "6680201428": "date4",  # [LI] 구글 인바운드 리드 → "날짜" (date 타입)
+    "3812729444": "date4",  # [BIVIZ] 태블로 TRIAL → "날짜" (date 타입)
 }
 
 

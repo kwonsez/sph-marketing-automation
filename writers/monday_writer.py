@@ -168,45 +168,71 @@ class MondayWriter:
         prev_values = self.get_previous_week_values(prev_item_name)
         
         # 3. 컬럼 값 매핑 준비
+        # collected_data에 키가 있고, config에 컬럼 ID가 비어있지 않을 때만 입력한다.
+        # 이로써 BIVIZ 같은 축소 리포트도 동일 writer로 처리 가능.
         col = self.config
         cv = {}
-        
-        # 기본 수치 입력
-        cv[col.col_start_date] = {"date": week_calc.format_start_date(monday_date)}
-        cv[col.col_lead_gen] = collected_data.get("lead_gen", 0)
-        cv[col.col_wau] = collected_data.get("wau", 0)
-        cv[col.col_contact_users] = collected_data.get("contact_users", 0)
-        cv[col.col_g_impressions] = collected_data.get("g_impressions", 0)
-        cv[col.col_g_clicks] = collected_data.get("g_clicks", 0)
-        cv[col.col_g_cost] = collected_data.get("g_cost", 0)
-        cv[col.col_n_impressions] = collected_data.get("n_impressions", 0)
-        cv[col.col_n_clicks] = collected_data.get("n_clicks", 0)
-        cv[col.col_n_cost] = collected_data.get("n_cost", 0)
-        cv[col.col_n_blog_posts] = collected_data.get("n_blog_posts", 0)
-        cv[col.col_n_blog_views] = collected_data.get("n_blog_views", 0)
 
-        # 4. 전주대비(WoW) 라벨 계산
+        # 시작날짜는 항상 입력
+        cv[col.col_start_date] = {"date": week_calc.format_start_date(monday_date)}
+
+        # (data_key, 컬럼 ID) 페어로 일괄 처리
+        numeric_fields = [
+            ("lead_gen", col.col_lead_gen),
+            ("wau", col.col_wau),
+            ("contact_users", col.col_contact_users),
+            ("g_impressions", col.col_g_impressions),
+            ("g_clicks", col.col_g_clicks),
+            ("g_cost", col.col_g_cost),
+            ("n_impressions", col.col_n_impressions),
+            ("n_clicks", col.col_n_clicks),
+            ("n_cost", col.col_n_cost),
+            ("n_blog_posts", col.col_n_blog_posts),
+            ("n_blog_views", col.col_n_blog_views),
+        ]
+        for data_key, col_id in numeric_fields:
+            if data_key in collected_data and col_id:
+                cv[col_id] = collected_data[data_key]
+
+        # 4. 전주대비(WoW) 라벨 계산 — 필요한 데이터/컬럼 모두 있을 때만
         # 전환율 비교 (신청문의 / WAU)
-        curr_conv = cv[col.col_contact_users] / cv[col.col_wau] if cv[col.col_wau] > 0 else 0
-        prev_conv = prev_values.get(col.col_contact_users, 0) / prev_values.get(col.col_wau, 1) if prev_values.get(col.col_wau, 0) > 0 else 0
-        label_conv = week_calc.compare_values(curr_conv, prev_conv)
-        if label_conv: cv[col.col_wow_conversion] = {"label": label_conv}
+        if "contact_users" in collected_data and "wau" in collected_data and col.col_wow_conversion:
+            curr_wau = collected_data["wau"]
+            curr_conv = collected_data["contact_users"] / curr_wau if curr_wau > 0 else 0
+            prev_wau = prev_values.get(col.col_wau, 0)
+            prev_conv = prev_values.get(col.col_contact_users, 0) / prev_wau if prev_wau > 0 else 0
+            label_conv = week_calc.compare_values(curr_conv, prev_conv)
+            if label_conv:
+                cv[col.col_wow_conversion] = {"label": label_conv}
 
         # GCTR 비교 (G클릭 / G노출)
-        curr_gctr = cv[col.col_g_clicks] / cv[col.col_g_impressions] if cv[col.col_g_impressions] > 0 else 0
-        prev_gctr = prev_values.get(col.col_g_clicks, 0) / prev_values.get(col.col_g_impressions, 1) if prev_values.get(col.col_g_impressions, 0) > 0 else 0
-        label_gctr = week_calc.compare_values(curr_gctr, prev_gctr, allow_same=False) # 동일 시 UP
-        if label_gctr: cv[col.col_wow_gctr] = {"label": label_gctr}
+        if "g_clicks" in collected_data and "g_impressions" in collected_data and col.col_wow_gctr:
+            curr_imp = collected_data["g_impressions"]
+            curr_gctr = collected_data["g_clicks"] / curr_imp if curr_imp > 0 else 0
+            prev_imp = prev_values.get(col.col_g_impressions, 0)
+            prev_gctr = prev_values.get(col.col_g_clicks, 0) / prev_imp if prev_imp > 0 else 0
+            label_gctr = week_calc.compare_values(curr_gctr, prev_gctr, allow_same=False)
+            if label_gctr:
+                cv[col.col_wow_gctr] = {"label": label_gctr}
 
         # NCTR 비교 (N클릭 / N노출)
-        curr_nctr = cv[col.col_n_clicks] / cv[col.col_n_impressions] if cv[col.col_n_impressions] > 0 else 0
-        prev_nctr = prev_values.get(col.col_n_clicks, 0) / prev_values.get(col.col_n_impressions, 1) if prev_values.get(col.col_n_impressions, 0) > 0 else 0
-        label_nctr = week_calc.compare_values(curr_nctr, prev_nctr)
-        if label_nctr: cv[col.col_wow_nctr] = {"label": label_nctr}
+        if "n_clicks" in collected_data and "n_impressions" in collected_data and col.col_wow_nctr:
+            curr_imp = collected_data["n_impressions"]
+            curr_nctr = collected_data["n_clicks"] / curr_imp if curr_imp > 0 else 0
+            prev_imp = prev_values.get(col.col_n_impressions, 0)
+            prev_nctr = prev_values.get(col.col_n_clicks, 0) / prev_imp if prev_imp > 0 else 0
+            label_nctr = week_calc.compare_values(curr_nctr, prev_nctr)
+            if label_nctr:
+                cv[col.col_wow_nctr] = {"label": label_nctr}
 
         # 블로그 조회수 비교
-        label_blog = week_calc.compare_values(cv[col.col_n_blog_views], prev_values.get(col.col_n_blog_views))
-        if label_blog: cv[col.col_wow_naver] = {"label": label_blog}
+        if "n_blog_views" in collected_data and col.col_wow_naver:
+            label_blog = week_calc.compare_values(
+                collected_data["n_blog_views"],
+                prev_values.get(col.col_n_blog_views),
+            )
+            if label_blog:
+                cv[col.col_wow_naver] = {"label": label_blog}
 
         # 5. 동일 이름 아이템 검색 → 있으면 업데이트, 없으면 생성
         existing_id = self.find_item_by_name(item_name)

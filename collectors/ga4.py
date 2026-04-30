@@ -31,6 +31,7 @@ class GA4Collector(BaseCollector):
     def __init__(self, config: GA4Config):
         super().__init__()
         self.property_id = config.property_id
+        self.contact_path = config.contact_path or "/contact"
         # 서비스 계정 키 경로를 환경변수로 설정 (라이브러리가 자동 참조)
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = config.credentials_path
         self.client = BetaAnalyticsDataClient()
@@ -66,7 +67,7 @@ class GA4Collector(BaseCollector):
         return 0
 
     def _get_contact_users(self, start_date: str, end_date: str) -> int:
-        """/contact 페이지 활성 사용자 수(activeUsers)를 조회한다."""
+        """신청문의 페이지 활성 사용자 수(activeUsers)를 조회한다."""
         request = RunReportRequest(
             property=f"properties/{self.property_id}",
             date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
@@ -77,7 +78,7 @@ class GA4Collector(BaseCollector):
                     field_name="pagePath",
                     string_filter=Filter.StringFilter(
                         match_type=Filter.StringFilter.MatchType.CONTAINS,
-                        value="/contact",
+                        value=self.contact_path,
                     ),
                 ),
             ),

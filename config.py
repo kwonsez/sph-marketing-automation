@@ -44,9 +44,22 @@ REQUIRED_ENV_GROUPS = {
         "MONDAY_COL_N_BLOG_VIEWS",
         "MONDAY_COL_WOW_NAVER",
     ],
+    "BIVIZ Monday.com": [
+        "MONDAY_BIVIZ_BOARD_ID",
+        "MONDAY_BIVIZ_LEAD_BOARD_IDS",
+        "MONDAY_BIVIZ_COL_START_DATE",
+        "MONDAY_BIVIZ_COL_LEAD_GEN",
+        "MONDAY_BIVIZ_COL_WAU",
+        "MONDAY_BIVIZ_COL_CONTACT_USERS",
+        "MONDAY_BIVIZ_COL_WOW_CONVERSION",
+    ],
     "GA4": [
         "GA4_PROPERTY_ID",
         "GOOGLE_APPLICATION_CREDENTIALS",
+    ],
+    "BIVIZ GA4": [
+        "BIVIZ_GA4_PROPERTY_ID",
+        "BIVIZ_CONTACT_PATH",
     ],
     "Google Ads": [
         "GOOGLE_ADS_DEVELOPER_TOKEN",
@@ -108,6 +121,7 @@ class GA4Config:
     """GA4 관련 설정"""
     property_id: str = ""
     credentials_path: str = ""
+    contact_path: str = "/contact"
 
 
 @dataclass
@@ -146,14 +160,31 @@ class GmailConfig:
 
 
 @dataclass
-class AppConfig:
-    """전체 애플리케이션 설정을 담는 최상위 설정 클래스"""
+class ReportProfile:
+    """단일 리포트(SPH 또는 BIVIZ)에 필요한 보드/GA4/사용 collector 설정 묶음"""
+    name: str  # 로그/메일 제목에 표시 ("SPH" 또는 "BIVIZ")
     monday: MondayConfig = field(default_factory=MondayConfig)
     ga4: GA4Config = field(default_factory=GA4Config)
+    use_google_ads: bool = False
+    use_naver_ads: bool = False
+    use_naver_blog: bool = False
+
+
+@dataclass
+class AppConfig:
+    """전체 애플리케이션 설정을 담는 최상위 설정 클래스"""
+    sph: ReportProfile = field(default_factory=lambda: ReportProfile(name="SPH"))
+    biviz: ReportProfile = field(default_factory=lambda: ReportProfile(name="BIVIZ"))
     google_ads: GoogleAdsConfig = field(default_factory=GoogleAdsConfig)
     naver_ads: NaverAdsConfig = field(default_factory=NaverAdsConfig)
     naver_blog: NaverBlogConfig = field(default_factory=NaverBlogConfig)
     gmail: GmailConfig = field(default_factory=GmailConfig)
+
+    def get_profile(self, name: str) -> ReportProfile:
+        """이름으로 프로필 반환. 'sph' 또는 'biviz'."""
+        if name.lower() == "biviz":
+            return self.biviz
+        return self.sph
 
 
 # ============================================================
@@ -208,13 +239,20 @@ def load_config(skip_groups: list[str] = None) -> AppConfig:
     lead_ids_raw = os.getenv("MONDAY_LEAD_BOARD_IDS", "")
     lead_board_ids = [bid.strip() for bid in lead_ids_raw.split(",") if bid.strip()]
 
+    biviz_lead_ids_raw = os.getenv("MONDAY_BIVIZ_LEAD_BOARD_IDS", "")
+    biviz_lead_board_ids = [bid.strip() for bid in biviz_lead_ids_raw.split(",") if bid.strip()]
+
     # GMAIL_RECIPIENT: 콤마 구분 문자열 → 리스트 (여러 명에게 발송 가능)
     recipients_raw = os.getenv("GMAIL_RECIPIENT", "")
     gmail_recipients = [addr.strip() for addr in recipients_raw.split(",") if addr.strip()]
 
-    config = AppConfig(
+    api_token = os.getenv("MONDAY_API_TOKEN", "")
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+
+    sph_profile = ReportProfile(
+        name="SPH",
         monday=MondayConfig(
-            api_token=os.getenv("MONDAY_API_TOKEN", ""),
+            api_token=api_token,
             weekly_board_id=os.getenv("MONDAY_WEEKLY_BOARD_ID", ""),
             lead_board_ids=lead_board_ids,
             col_start_date=os.getenv("MONDAY_COL_START_DATE", ""),
@@ -236,8 +274,40 @@ def load_config(skip_groups: list[str] = None) -> AppConfig:
         ),
         ga4=GA4Config(
             property_id=os.getenv("GA4_PROPERTY_ID", ""),
-            credentials_path=os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""),
+            credentials_path=credentials_path,
+            contact_path=os.getenv("CONTACT_PATH", "/contact"),
         ),
+        use_google_ads=True,
+        use_naver_ads=True,
+        use_naver_blog=True,
+    )
+
+    biviz_profile = ReportProfile(
+        name="BIVIZ",
+        monday=MondayConfig(
+            api_token=api_token,
+            weekly_board_id=os.getenv("MONDAY_BIVIZ_BOARD_ID", ""),
+            lead_board_ids=biviz_lead_board_ids,
+            col_start_date=os.getenv("MONDAY_BIVIZ_COL_START_DATE", ""),
+            col_lead_gen=os.getenv("MONDAY_BIVIZ_COL_LEAD_GEN", ""),
+            col_wau=os.getenv("MONDAY_BIVIZ_COL_WAU", ""),
+            col_contact_users=os.getenv("MONDAY_BIVIZ_COL_CONTACT_USERS", ""),
+            col_wow_conversion=os.getenv("MONDAY_BIVIZ_COL_WOW_CONVERSION", ""),
+            # 광고/블로그 컬럼은 BIVIZ에서 사용 안 함 → 빈 문자열 유지
+        ),
+        ga4=GA4Config(
+            property_id=os.getenv("BIVIZ_GA4_PROPERTY_ID", ""),
+            credentials_path=credentials_path,
+            contact_path=os.getenv("BIVIZ_CONTACT_PATH", "/contact"),
+        ),
+        use_google_ads=False,
+        use_naver_ads=False,
+        use_naver_blog=False,
+    )
+
+    config = AppConfig(
+        sph=sph_profile,
+        biviz=biviz_profile,
         google_ads=GoogleAdsConfig(
             developer_token=os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN", ""),
             client_id=os.getenv("GOOGLE_ADS_CLIENT_ID", ""),
@@ -281,6 +351,9 @@ if __name__ == "__main__":
     else:
         print("모든 환경변수가 설정되어 있습니다.")
         config = load_config()
-        print(f"  Monday 보드 ID: {config.monday.weekly_board_id}")
-        print(f"  Lead 보드 수: {len(config.monday.lead_board_ids)}개")
-        print(f"  GA4 속성 ID: {config.ga4.property_id}")
+        print(f"  [SPH]   Monday 보드: {config.sph.monday.weekly_board_id}, "
+              f"Lead 보드 {len(config.sph.monday.lead_board_ids)}개, "
+              f"GA4 {config.sph.ga4.property_id}")
+        print(f"  [BIVIZ] Monday 보드: {config.biviz.monday.weekly_board_id}, "
+              f"Lead 보드 {len(config.biviz.monday.lead_board_ids)}개, "
+              f"GA4 {config.biviz.ga4.property_id}")

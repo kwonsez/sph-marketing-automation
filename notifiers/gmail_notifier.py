@@ -41,9 +41,18 @@ class GmailNotifier:
         except Exception as e:
             self.logger.error(f"이메일 발송 실패: {e}")
 
-    def notify_success(self, week_name: str, data: dict):
-        """성공 알림을 보낸다."""
-        subject = f"✅ [성공] {week_name} 마케팅 리포트 자동화 완료"
+    def notify_success(self, week_name: str, data: dict, was_update: bool = False):
+        """성공 알림을 보낸다.
+
+        Args:
+            week_name: 대상 주차 이름.
+            data: 입력된 데이터 딕셔너리.
+            was_update: True면 기존 아이템 덮어쓰기, False면 신규 생성.
+        """
+        if was_update:
+            subject = f"🔄 [업데이트] {week_name} 마케팅 리포트 덮어쓰기 완료"
+        else:
+            subject = f"✅ [성공] {week_name} 마케팅 리포트 자동화 완료"
         
         rows = ""
         for key, value in data.items():

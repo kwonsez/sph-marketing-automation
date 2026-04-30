@@ -70,6 +70,55 @@ class MondayWriter:
         res = self._execute_query(create_query, {"boardId": self.board_id, "groupTitle": group_title})
         return res["data"]["create_group"]["id"]
 
+    def find_item_by_name(self, item_name: str) -> str | None:
+        """보드에서 동일 이름 아이템을 찾아 ID를 반환한다. 없으면 None.
+
+        2개 이상 중복 존재 시: 가장 ID가 큰 (=가장 최근 생성된) 아이템을 반환한다.
+        나머지 중복 아이템은 사용자가 수동으로 정리해야 한다.
+        """
+        query = """
+        query ($boardId: [ID!]) {
+            boards(ids: $boardId) {
+                items_page (limit: 100) {
+                    cursor
+                    items { id name }
+                }
+            }
+        }
+        """
+        next_q = """
+        query ($cursor: String!) {
+            next_items_page (limit: 100, cursor: $cursor) {
+                cursor
+                items { id name }
+            }
+        }
+        """
+
+        matches: list[str] = []
+        data = self._execute_query(query, {"boardId": [self.board_id]})
+        page = data["data"]["boards"][0]["items_page"]
+        while True:
+            for it in page["items"]:
+                if it["name"] == item_name:
+                    matches.append(it["id"])
+            cursor = page.get("cursor")
+            if not cursor:
+                break
+            data = self._execute_query(next_q, {"cursor": cursor})
+            page = data["data"]["next_items_page"]
+
+        if not matches:
+            return None
+        if len(matches) > 1:
+            self.logger.warning(
+                f"동일 이름 아이템 {len(matches)}개 발견 ({item_name}). "
+                f"가장 최근 ID를 업데이트하고 나머지는 보존합니다. "
+                f"수동 정리 필요: {matches}"
+            )
+        # ID가 큰 것 = 가장 최근 생성
+        return max(matches, key=lambda x: int(x))
+
     def get_previous_week_values(self, prev_item_name: str) -> dict:
         """전주 아이템을 찾아 비교에 필요한 값들을 가져온다."""
         query = """
@@ -159,8 +208,31 @@ class MondayWriter:
         label_blog = week_calc.compare_values(cv[col.col_n_blog_views], prev_values.get(col.col_n_blog_views))
         if label_blog: cv[col.col_wow_naver] = {"label": label_blog}
 
-        # 5. 아이템 생성 실행
-        self.logger.info(f"아이템 생성 중: {item_name}")
+        # 5. 동일 이름 아이템 검색 → 있으면 업데이트, 없으면 생성
+        existing_id = self.find_item_by_name(item_name)
+
+        if existing_id:
+            self.logger.info(f"기존 아이템 발견 (ID: {existing_id}). 컬럼 값 업데이트 중: {item_name}")
+            update_query = """
+            mutation ($boardId: ID!, $itemId: ID!, $columnValues: JSON!) {
+                change_multiple_column_values (
+                    board_id: $boardId,
+                    item_id: $itemId,
+                    column_values: $columnValues
+                ) { id }
+            }
+            """
+            variables = {
+                "boardId": self.board_id,
+                "itemId": existing_id,
+                "columnValues": json.dumps(cv),
+            }
+            res = self._execute_query(update_query, variables)
+            updated_id = res["data"]["change_multiple_column_values"]["id"]
+            self.logger.info(f"업데이트 완료! 아이템 ID: {updated_id}")
+            return {"item_id": updated_id, "was_update": True}
+
+        self.logger.info(f"신규 아이템 생성 중: {item_name}")
         create_item_query = """
         mutation ($boardId: ID!, $groupId: String!, $itemName: String!, $columnValues: JSON!) {
             create_item (
@@ -177,8 +249,8 @@ class MondayWriter:
             "itemName": item_name,
             "columnValues": json.dumps(cv)
         }
-        
+
         res = self._execute_query(create_item_query, variables)
         new_id = res["data"]["create_item"]["id"]
-        self.logger.info(f"작성 완료! 아이템 ID: {new_id}")
-        return new_id
+        self.logger.info(f"신규 작성 완료! 아이템 ID: {new_id}")
+        return {"item_id": new_id, "was_update": False}

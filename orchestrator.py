@@ -78,12 +78,15 @@ class Orchestrator:
             return
 
         try:
-            # 4. Monday.com 기록
-            item_id = self.writer.write(last_mon, last_sun, all_data)
-            
+            # 4. Monday.com 기록 (동일 주차 아이템 있으면 덮어쓰기, 없으면 신규)
+            result = self.writer.write(last_mon, last_sun, all_data)
+            item_id = result["item_id"]
+            was_update = result["was_update"]
+
             # 5. 성공 알림 발송
-            self.notifier.notify_success(week_name, all_data)
-            self.logger.info(f"✅ 모든 작업이 성공적으로 완료되었습니다. (ID: {item_id})")
+            self.notifier.notify_success(week_name, all_data, was_update=was_update)
+            mode = "업데이트" if was_update else "신규 작성"
+            self.logger.info(f"✅ 모든 작업이 성공적으로 완료되었습니다 ({mode}, ID: {item_id})")
 
         except Exception as e:
             self.logger.error(f"Monday.com 기록 중 오류: {e}")

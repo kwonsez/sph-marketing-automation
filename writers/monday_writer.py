@@ -153,6 +153,58 @@ class MondayWriter:
                 break
         return prev_data
 
+    def get_status_label_maps(self) -> dict:
+        """보드의 status(color) 컬럼별 실제 라벨 맵을 조회한다.
+
+        Status 컬럼은 보드마다/컬럼마다 라벨 대소문자가 다르다
+        (예: 전환율 컬럼은 "SAME", N전주대비 컬럼은 "Same").
+        계산된 라벨("UP"/"Down"/"SAME")을 보드의 실제 라벨에 맞추기 위해
+        {컬럼ID: {소문자라벨: 실제라벨}} 형태의 맵을 만든다.
+
+        Returns:
+            dict — { col_id: { lower_label: actual_label } }
+        """
+        query = """
+        query ($boardId: [ID!]) {
+            boards(ids: $boardId) {
+                columns { id type settings_str }
+            }
+        }
+        """
+        data = self._execute_query(query, {"boardId": [self.board_id]})
+        columns = data["data"]["boards"][0]["columns"]
+
+        label_maps: dict = {}
+        for c in columns:
+            if c["type"] not in ("status", "color"):
+                continue
+            try:
+                settings = json.loads(c["settings_str"] or "{}")
+            except (ValueError, TypeError):
+                continue
+            labels = settings.get("labels", {})
+            # labels: {"0": "Down", "1": "UP", "2": "Same"}
+            label_maps[c["id"]] = {
+                str(v).lower(): str(v) for v in labels.values() if v
+            }
+        return label_maps
+
+    def _normalize_status_labels(self, cv: dict, label_maps: dict) -> None:
+        """cv 안의 status 라벨 값을 보드 실제 라벨(대소문자)에 맞춰 보정한다.
+
+        보드에 없는 라벨이면 그대로 두어 API 에러로 드러나게 한다.
+        cv를 제자리(in-place)에서 수정한다.
+        """
+        for col_id, value in cv.items():
+            if not (isinstance(value, dict) and "label" in value):
+                continue
+            col_map = label_maps.get(col_id)
+            if not col_map:
+                continue
+            actual = col_map.get(str(value["label"]).lower())
+            if actual:
+                value["label"] = actual
+
     def write(self, monday_date: datetime, sunday_date: datetime, collected_data: dict):
         """데이터를 Monday.com에 최종 작성한다."""
         item_name = week_calc.build_item_name(monday_date, sunday_date)
@@ -233,6 +285,10 @@ class MondayWriter:
             )
             if label_blog:
                 cv[col.col_wow_naver] = {"label": label_blog}
+
+        # 4-1. status 라벨을 보드 실제 라벨(대소문자)에 맞춰 보정
+        label_maps = self.get_status_label_maps()
+        self._normalize_status_labels(cv, label_maps)
 
         # 5. 동일 이름 아이템 검색 → 있으면 업데이트, 없으면 생성
         existing_id = self.find_item_by_name(item_name)

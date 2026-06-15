@@ -22,7 +22,7 @@ from collectors.monday_lead import MondayLeadCollector
 from collectors.base import NaverBlogError
 from config import AppConfig, ReportProfile
 from notifiers.gmail_notifier import GmailNotifier
-from utils import week_calc
+from utils import week_calc, naver_session
 from writers.monday_writer import MondayWriter
 
 
@@ -82,6 +82,7 @@ class Orchestrator:
                 "naver_ads": self.profile.use_naver_ads,
                 "naver_blog": self.profile.use_naver_blog,
             },
+            "session_warning": None,
         }
 
         all_data = {}
@@ -105,6 +106,18 @@ class Orchestrator:
                 if send_notification:
                     self.notifier.notify_failure(f"{tag} {week_name}", err_msg)
                 return result
+
+        # 네이버 블로그 프로필이면 세션 만료 임박/만료를 점검해 경고 문구를 만든다.
+        # (a) 수집 중 실제 만료 감지, (b) 사전 점검(파일 만료일/경과일) 둘 다 반영.
+        collector_expired = all_data.pop("n_blog_session_expired", False)
+        if self.profile.use_naver_blog:
+            health = naver_session.check_session_health()
+            if collector_expired:
+                result["session_warning"] = (
+                    f"네이버 세션이 만료되어 블로그 조회수를 수집하지 못했습니다. {naver_session.REFRESH_HINT}"
+                )
+            elif health.needs_attention:
+                result["session_warning"] = health.message
 
         result["data"] = all_data
 
@@ -130,6 +143,7 @@ class Orchestrator:
             if send_notification:
                 self.notifier.notify_success(
                     f"{tag} {week_name}", all_data, was_update=result["was_update"],
+                    session_warning=result["session_warning"],
                 )
 
         except Exception as e:

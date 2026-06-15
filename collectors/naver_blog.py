@@ -26,6 +26,7 @@ class NaverBlogCollector(BaseCollector):
         super().__init__()
         self.blog_id = config.blog_id
         self.session_path = "naver_session.json"
+        self._session_expired = False
 
     def collect(self, start_date: str, end_date: str) -> dict:
         """포스팅 수와 주간 조회수를 수집한다.
@@ -51,6 +52,7 @@ class NaverBlogCollector(BaseCollector):
                 "세션 파일이 없습니다. tools/save_naver_session.py를 실행하세요."
             )
 
+        self._session_expired = False  # _get_views에서 만료 감지 시 True
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
@@ -65,7 +67,11 @@ class NaverBlogCollector(BaseCollector):
                 browser.close()
 
         self.logger.info(f"블로그 수집 완료: 포스팅={post_count}, 조회={view_count}")
-        return {"n_blog_posts": post_count, "n_blog_views": view_count}
+        return {
+            "n_blog_posts": post_count,
+            "n_blog_views": view_count,
+            "n_blog_session_expired": self._session_expired,
+        }
 
     def _count_posts(self, page, start_date: str, end_date: str) -> int:
         """#mainFrame iframe 내 목록 테이블에서 해당 기간의 포스팅 수를 센다.
@@ -169,6 +175,22 @@ class NaverBlogCollector(BaseCollector):
             page.wait_for_load_state("networkidle", timeout=30000)
         except PlaywrightTimeout:
             self.logger.warning("통계 페이지 로딩 타임아웃, 계속 진행합니다.")
+
+        # 세션 만료/로그아웃 감지 — 로그인 안 되어 있으면 통계 페이지가
+        # "접근할 수 없는 페이지입니다" 에러를 띄운다. (NID_SES 쿠키는 ~30일마다 만료)
+        try:
+            body_text = page.inner_text("body", timeout=5000)
+            if "접근할 수 없는" in body_text or "주소를 다시 확인" in body_text:
+                self._session_expired = True
+                self.logger.error(
+                    "네이버 세션이 만료되었습니다 (통계 페이지 접근 불가). "
+                    "`python tools/save_naver_session.py`로 세션을 재발급하세요. "
+                    "세션 쿠키(NID_SES)는 약 30일마다 만료됩니다."
+                )
+                page.screenshot(path="debug_stats_error.png")
+                return 0
+        except Exception:
+            pass
 
         try:
             weekly_btn = page.locator('a[data-nclk="weekly"]')

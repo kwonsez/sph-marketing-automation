@@ -41,13 +41,27 @@ class GmailNotifier:
         except Exception as e:
             self.logger.error(f"이메일 발송 실패: {e}")
 
-    def notify_success(self, week_name: str, data: dict, was_update: bool = False):
+    def _warning_banner(self, warning: str | None) -> str:
+        """세션 만료 임박 등 경고 문구를 노란 배너 HTML로 만든다. 없으면 빈 문자열."""
+        if not warning:
+            return ""
+        return (
+            "<div style='margin:16px 0; padding:12px 16px; background:#fff3cd; "
+            "border:1px solid #ffe69c; border-left:4px solid #ff9800; border-radius:4px;'>"
+            f"<b>⚠️ 네이버 세션 알림</b><br>{warning}</div>"
+        )
+
+    def notify_success(
+        self, week_name: str, data: dict, was_update: bool = False,
+        session_warning: str | None = None,
+    ):
         """성공 알림을 보낸다.
 
         Args:
             week_name: 대상 주차 이름.
             data: 입력된 데이터 딕셔너리.
             was_update: True면 기존 아이템 덮어쓰기, False면 신규 생성.
+            session_warning: 네이버 세션 만료 임박/만료 경고 문구 (없으면 None).
         """
         if was_update:
             subject = f"🔄 [업데이트] {week_name} 마케팅 리포트 덮어쓰기 완료"
@@ -65,6 +79,7 @@ class GmailNotifier:
         <html>
         <body>
             <h2>📊 {week_name} 리포트 작성 완료</h2>
+            {self._warning_banner(session_warning)}
             <p>Monday.com 보드에 데이터가 성공적으로 기록되었습니다.</p>
             <table style='border-collapse: collapse; width: 100%; max-width: 400px;'>
                 <thead>
@@ -98,13 +113,14 @@ class GmailNotifier:
         """
         self._send_email(subject, html)
 
-    def notify_combined(self, results: list[dict]):
+    def notify_combined(self, results: list[dict], session_warning: str | None = None):
         """여러 프로필 결과를 한 통의 메일로 발송한다.
 
         Args:
             results: Orchestrator.run()이 반환한 결과 dict 리스트.
                      각 dict는 profile_name, week_name, success, data, item_id,
                      was_update, error 키를 가진다.
+            session_warning: 네이버 세션 만료 임박/만료 경고 문구 (없으면 None).
         """
         if not results:
             self.logger.warning("발송할 결과가 없습니다.")
@@ -138,6 +154,7 @@ class GmailNotifier:
         <body style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             <h2 style="color: {color};">📊 {heading}</h2>
             <p><b>대상 주차:</b> {week_name}</p>
+            {self._warning_banner(session_warning)}
             {sections}
         </body>
         </html>

@@ -102,7 +102,11 @@ def main():
     # 5. 다중 실행이면 통합 메일 1통 발송 (dry-run 제외)
     if is_multi and not args.dry_run:
         notifier = GmailNotifier(config.gmail)
-        notifier.notify_combined(results)
+        # 어느 프로필이든 세션 경고가 있으면 통합 메일 상단에 한 번 노출
+        session_warning = next(
+            (r.get("session_warning") for r in results if r.get("session_warning")), None
+        )
+        notifier.notify_combined(results, session_warning=session_warning)
 
 
 if __name__ == "__main__":

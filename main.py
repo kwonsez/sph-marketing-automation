@@ -4,11 +4,10 @@ Weekly Report Automation - CLI Entry Point
 
 import argparse
 import logging
-import os
 import sys
 from datetime import datetime
 
-from config import load_config
+from config import get_env, load_config
 from notifiers.gmail_notifier import GmailNotifier
 from orchestrator import Orchestrator
 
@@ -40,8 +39,8 @@ def main():
     # BIVIZ 환경변수가 모두 설정되어 있는지 사전 확인.
     # GitHub Actions 등에서 BIVIZ 변수가 아직 추가되지 않은 경우, all 실행 시
     # SPH까지 같이 실패하지 않도록 BIVIZ를 자동 비활성화한다.
-    biviz_available = bool(os.getenv("MONDAY_BIVIZ_BOARD_ID")) and bool(
-        os.getenv("BIVIZ_GA4_PROPERTY_ID")
+    biviz_available = bool(get_env("MONDAY_BIVIZ_BOARD_ID")) and bool(
+        get_env("BIVIZ_GA4_PROPERTY_ID")
     )
 
     # 1. 설정 로드 — 검증 스킵 그룹 결정

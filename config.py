@@ -16,6 +16,34 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+def get_env(name: str, default: str = "") -> str:
+    """환경변수를 읽어 앞뒤 공백/개행을 제거한 값으로 반환한다.
+
+    GitHub Actions Variables에 값을 붙여넣을 때 CR/LF가 함께 들어가는 사고가
+    실제로 있었다(MONDAY_COL_WAU = "__\\r\\n"). 컬럼 ID에 개행이 붙으면
+    Monday.com이 해당 키를 에러 없이 조용히 버리기 때문에, 특정 컬럼만
+    영구히 빈칸으로 기록된다. 모든 환경변수를 여기서 한 번 정리해 원천 차단한다.
+
+    Args:
+        name: 환경변수 이름.
+        default: 값이 없거나 공백뿐일 때 반환할 기본값.
+
+    Returns:
+        앞뒤 공백이 제거된 문자열. 값이 없으면 default.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    cleaned = raw.strip()
+    if cleaned != raw:
+        logger.warning(
+            f"환경변수 {name} 값의 앞뒤에 공백/개행이 있어 자동 제거했습니다. "
+            f"({raw!r} → {cleaned!r}) — 설정 원본도 정리하는 것을 권장합니다."
+        )
+    return cleaned or default
+
+
 # ============================================================
 # 필수 환경변수 정의
 # ============================================================
@@ -208,7 +236,8 @@ def validate_env_vars(skip_groups: list[str] = None) -> list[str]:
         if group_name in skip:
             continue
         for var in var_names:
-            if not os.getenv(var):
+            # 공백/개행만 들어있는 값도 누락으로 취급한다.
+            if not get_env(var):
                 missing.append(f"  [{group_name}] {var}")
 
     return missing
@@ -236,46 +265,46 @@ def load_config(skip_groups: list[str] = None) -> AppConfig:
         sys.exit(1)
 
     # MONDAY_LEAD_BOARD_IDS: 콤마 구분 문자열 → 리스트
-    lead_ids_raw = os.getenv("MONDAY_LEAD_BOARD_IDS", "")
+    lead_ids_raw = get_env("MONDAY_LEAD_BOARD_IDS", "")
     lead_board_ids = [bid.strip() for bid in lead_ids_raw.split(",") if bid.strip()]
 
-    biviz_lead_ids_raw = os.getenv("MONDAY_BIVIZ_LEAD_BOARD_IDS", "")
+    biviz_lead_ids_raw = get_env("MONDAY_BIVIZ_LEAD_BOARD_IDS", "")
     biviz_lead_board_ids = [bid.strip() for bid in biviz_lead_ids_raw.split(",") if bid.strip()]
 
     # GMAIL_RECIPIENT: 콤마 구분 문자열 → 리스트 (여러 명에게 발송 가능)
-    recipients_raw = os.getenv("GMAIL_RECIPIENT", "")
+    recipients_raw = get_env("GMAIL_RECIPIENT", "")
     gmail_recipients = [addr.strip() for addr in recipients_raw.split(",") if addr.strip()]
 
-    api_token = os.getenv("MONDAY_API_TOKEN", "")
-    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+    api_token = get_env("MONDAY_API_TOKEN", "")
+    credentials_path = get_env("GOOGLE_APPLICATION_CREDENTIALS", "")
 
     sph_profile = ReportProfile(
         name="SPH",
         monday=MondayConfig(
             api_token=api_token,
-            weekly_board_id=os.getenv("MONDAY_WEEKLY_BOARD_ID", ""),
+            weekly_board_id=get_env("MONDAY_WEEKLY_BOARD_ID", ""),
             lead_board_ids=lead_board_ids,
-            col_start_date=os.getenv("MONDAY_COL_START_DATE", ""),
-            col_lead_gen=os.getenv("MONDAY_COL_LEAD_GEN", ""),
-            col_wau=os.getenv("MONDAY_COL_WAU", ""),
-            col_contact_users=os.getenv("MONDAY_COL_CONTACT_USERS", ""),
-            col_g_impressions=os.getenv("MONDAY_COL_G_IMPRESSIONS", ""),
-            col_g_clicks=os.getenv("MONDAY_COL_G_CLICKS", ""),
-            col_g_cost=os.getenv("MONDAY_COL_G_COST", ""),
-            col_wow_conversion=os.getenv("MONDAY_COL_WOW_CONVERSION", ""),
-            col_wow_gctr=os.getenv("MONDAY_COL_WOW_GCTR", ""),
-            col_n_impressions=os.getenv("MONDAY_COL_N_IMPRESSIONS", ""),
-            col_n_clicks=os.getenv("MONDAY_COL_N_CLICKS", ""),
-            col_n_cost=os.getenv("MONDAY_COL_N_COST", ""),
-            col_wow_nctr=os.getenv("MONDAY_COL_WOW_NCTR", ""),
-            col_n_blog_posts=os.getenv("MONDAY_COL_N_BLOG_POSTS", ""),
-            col_n_blog_views=os.getenv("MONDAY_COL_N_BLOG_VIEWS", ""),
-            col_wow_naver=os.getenv("MONDAY_COL_WOW_NAVER", ""),
+            col_start_date=get_env("MONDAY_COL_START_DATE", ""),
+            col_lead_gen=get_env("MONDAY_COL_LEAD_GEN", ""),
+            col_wau=get_env("MONDAY_COL_WAU", ""),
+            col_contact_users=get_env("MONDAY_COL_CONTACT_USERS", ""),
+            col_g_impressions=get_env("MONDAY_COL_G_IMPRESSIONS", ""),
+            col_g_clicks=get_env("MONDAY_COL_G_CLICKS", ""),
+            col_g_cost=get_env("MONDAY_COL_G_COST", ""),
+            col_wow_conversion=get_env("MONDAY_COL_WOW_CONVERSION", ""),
+            col_wow_gctr=get_env("MONDAY_COL_WOW_GCTR", ""),
+            col_n_impressions=get_env("MONDAY_COL_N_IMPRESSIONS", ""),
+            col_n_clicks=get_env("MONDAY_COL_N_CLICKS", ""),
+            col_n_cost=get_env("MONDAY_COL_N_COST", ""),
+            col_wow_nctr=get_env("MONDAY_COL_WOW_NCTR", ""),
+            col_n_blog_posts=get_env("MONDAY_COL_N_BLOG_POSTS", ""),
+            col_n_blog_views=get_env("MONDAY_COL_N_BLOG_VIEWS", ""),
+            col_wow_naver=get_env("MONDAY_COL_WOW_NAVER", ""),
         ),
         ga4=GA4Config(
-            property_id=os.getenv("GA4_PROPERTY_ID", ""),
+            property_id=get_env("GA4_PROPERTY_ID", ""),
             credentials_path=credentials_path,
-            contact_path=os.getenv("CONTACT_PATH", "/contact"),
+            contact_path=get_env("CONTACT_PATH", "/contact"),
         ),
         use_google_ads=True,
         use_naver_ads=True,
@@ -286,19 +315,19 @@ def load_config(skip_groups: list[str] = None) -> AppConfig:
         name="BIVIZ",
         monday=MondayConfig(
             api_token=api_token,
-            weekly_board_id=os.getenv("MONDAY_BIVIZ_BOARD_ID", ""),
+            weekly_board_id=get_env("MONDAY_BIVIZ_BOARD_ID", ""),
             lead_board_ids=biviz_lead_board_ids,
-            col_start_date=os.getenv("MONDAY_BIVIZ_COL_START_DATE", ""),
-            col_lead_gen=os.getenv("MONDAY_BIVIZ_COL_LEAD_GEN", ""),
-            col_wau=os.getenv("MONDAY_BIVIZ_COL_WAU", ""),
-            col_contact_users=os.getenv("MONDAY_BIVIZ_COL_CONTACT_USERS", ""),
-            col_wow_conversion=os.getenv("MONDAY_BIVIZ_COL_WOW_CONVERSION", ""),
+            col_start_date=get_env("MONDAY_BIVIZ_COL_START_DATE", ""),
+            col_lead_gen=get_env("MONDAY_BIVIZ_COL_LEAD_GEN", ""),
+            col_wau=get_env("MONDAY_BIVIZ_COL_WAU", ""),
+            col_contact_users=get_env("MONDAY_BIVIZ_COL_CONTACT_USERS", ""),
+            col_wow_conversion=get_env("MONDAY_BIVIZ_COL_WOW_CONVERSION", ""),
             # 광고/블로그 컬럼은 BIVIZ에서 사용 안 함 → 빈 문자열 유지
         ),
         ga4=GA4Config(
-            property_id=os.getenv("BIVIZ_GA4_PROPERTY_ID", ""),
+            property_id=get_env("BIVIZ_GA4_PROPERTY_ID", ""),
             credentials_path=credentials_path,
-            contact_path=os.getenv("BIVIZ_CONTACT_PATH", "/contact"),
+            contact_path=get_env("BIVIZ_CONTACT_PATH", "/contact"),
         ),
         use_google_ads=False,
         use_naver_ads=False,
@@ -309,26 +338,26 @@ def load_config(skip_groups: list[str] = None) -> AppConfig:
         sph=sph_profile,
         biviz=biviz_profile,
         google_ads=GoogleAdsConfig(
-            developer_token=os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN", ""),
-            client_id=os.getenv("GOOGLE_ADS_CLIENT_ID", ""),
-            client_secret=os.getenv("GOOGLE_ADS_CLIENT_SECRET", ""),
-            refresh_token=os.getenv("GOOGLE_ADS_REFRESH_TOKEN", ""),
-            login_customer_id=os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID", ""),
-            customer_id=os.getenv("GOOGLE_ADS_CUSTOMER_ID", ""),
+            developer_token=get_env("GOOGLE_ADS_DEVELOPER_TOKEN", ""),
+            client_id=get_env("GOOGLE_ADS_CLIENT_ID", ""),
+            client_secret=get_env("GOOGLE_ADS_CLIENT_SECRET", ""),
+            refresh_token=get_env("GOOGLE_ADS_REFRESH_TOKEN", ""),
+            login_customer_id=get_env("GOOGLE_ADS_LOGIN_CUSTOMER_ID", ""),
+            customer_id=get_env("GOOGLE_ADS_CUSTOMER_ID", ""),
         ),
         naver_ads=NaverAdsConfig(
-            api_key=os.getenv("NAVER_ADS_API_KEY", ""),
-            secret_key=os.getenv("NAVER_ADS_SECRET_KEY", ""),
-            customer_id=os.getenv("NAVER_ADS_CUSTOMER_ID", ""),
+            api_key=get_env("NAVER_ADS_API_KEY", ""),
+            secret_key=get_env("NAVER_ADS_SECRET_KEY", ""),
+            customer_id=get_env("NAVER_ADS_CUSTOMER_ID", ""),
         ),
         naver_blog=NaverBlogConfig(
-            login_id=os.getenv("NAVER_LOGIN_ID", ""),
-            login_pw=os.getenv("NAVER_LOGIN_PW", ""),
-            blog_id=os.getenv("NAVER_BLOG_ID", ""),
+            login_id=get_env("NAVER_LOGIN_ID", ""),
+            login_pw=get_env("NAVER_LOGIN_PW", ""),
+            blog_id=get_env("NAVER_BLOG_ID", ""),
         ),
         gmail=GmailConfig(
-            sender=os.getenv("GMAIL_SENDER", ""),
-            app_password=os.getenv("GMAIL_APP_PASSWORD", ""),
+            sender=get_env("GMAIL_SENDER", ""),
+            app_password=get_env("GMAIL_APP_PASSWORD", ""),
             recipients=gmail_recipients,
         ),
     )

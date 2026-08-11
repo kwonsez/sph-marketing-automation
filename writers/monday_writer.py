@@ -16,6 +16,27 @@ from utils import week_calc
 MONDAY_API_URL = "https://api.monday.com/v2"
 
 class MondayWriter:
+    # MondayConfig의 컬럼 필드명 → 보드에 보이는 컬럼명.
+    # 컬럼 ID 검증 실패 메시지를 사람이 읽을 수 있게 만들기 위한 매핑이다.
+    COLUMN_FIELD_LABELS = {
+        "col_start_date": "시작날짜",
+        "col_lead_gen": "Lead Gen",
+        "col_wau": "WAU",
+        "col_contact_users": "신청문의 페이지 사용자",
+        "col_g_impressions": "G노출수",
+        "col_g_clicks": "G클릭수",
+        "col_g_cost": "G광고비",
+        "col_wow_conversion": "전주대비",
+        "col_wow_gctr": "전주대비(GCTR)",
+        "col_n_impressions": "N노출수",
+        "col_n_clicks": "N클릭수",
+        "col_n_cost": "N광고비",
+        "col_wow_nctr": "전주대비(NCTR)",
+        "col_n_blog_posts": "Naver 포스팅수",
+        "col_n_blog_views": "N블로그 조회수",
+        "col_wow_naver": "N전주대비",
+    }
+
     def __init__(self, config: MondayConfig):
         self.logger = logging.getLogger("writer.monday")
         self.api_token = config.api_token
@@ -26,6 +47,7 @@ class MondayWriter:
             "Content-Type": "application/json",
             "API-Version": "2023-10"
         }
+        self._columns_cache: list[dict] | None = None
 
     def _execute_query(self, query: str, variables: dict = None) -> dict:
         """Monday.com API 실행 헬퍼"""
@@ -153,6 +175,104 @@ class MondayWriter:
                 break
         return prev_data
 
+    def get_board_columns(self) -> list[dict]:
+        """보드의 컬럼 목록을 조회한다. 실행당 1회만 호출하고 이후 캐시를 쓴다.
+
+        Returns:
+            [{"id": str, "type": str, "title": str, "settings_str": str}, ...]
+        """
+        if self._columns_cache is not None:
+            return self._columns_cache
+
+        query = """
+        query ($boardId: [ID!]) {
+            boards(ids: $boardId) {
+                columns { id title type settings_str }
+            }
+        }
+        """
+        data = self._execute_query(query, {"boardId": [self.board_id]})
+        self._columns_cache = data["data"]["boards"][0]["columns"]
+        return self._columns_cache
+
+    def validate_column_ids(self) -> None:
+        """설정된 컬럼 ID가 실제 보드에 존재하는지 기록 전에 확인한다.
+
+        Monday API는 column_values에 보드에 없는 컬럼 ID가 들어오면
+        에러 없이 그 키만 조용히 버린다. 그래서 오타나 값 끝의 개행 하나로
+        특정 컬럼만 매주 빈칸으로 기록되어도 로그·메일 어디에도 흔적이 남지 않는다.
+        (실제로 MONDAY_COL_WAU = "__\r\n" 때문에 WAU가 계속 누락된 적이 있다.)
+        기록 전에 미리 대조해 즉시 실패시킨다.
+
+        Raises:
+            ValueError: 보드에 없는 컬럼 ID가 설정된 경우.
+        """
+        board_column_ids = {c["id"] for c in self.get_board_columns()}
+
+        invalid = []
+        for field_name, label in self.COLUMN_FIELD_LABELS.items():
+            col_id = getattr(self.config, field_name, "")
+            # 빈 값은 "이 프로필에서 사용 안 함"이라는 의도된 설정이므로 통과.
+            if col_id and col_id not in board_column_ids:
+                invalid.append(f"{label} ({field_name}) → {col_id!r}")
+
+        if invalid:
+            raise ValueError(
+                f"보드({self.board_id})에 존재하지 않는 컬럼 ID가 설정되어 있습니다. "
+                f"이대로 기록하면 해당 값이 조용히 누락됩니다:\n  - "
+                + "\n  - ".join(invalid)
+            )
+
+    def verify_written_values(self, item_id: str, cv: dict) -> list[str]:
+        """기록 직후 아이템을 다시 읽어 의도한 값이 실제로 저장됐는지 대조한다.
+
+        Args:
+            item_id: 방금 생성/업데이트한 아이템 ID.
+            cv: 기록에 사용한 {컬럼ID: 값} 딕셔너리.
+
+        Returns:
+            불일치 항목 설명 리스트. 비어 있으면 모두 정상 저장됨.
+        """
+        query = """
+        query ($itemId: [ID!]) {
+            items (ids: $itemId) {
+                column_values { id text }
+            }
+        }
+        """
+        data = self._execute_query(query, {"itemId": [item_id]})
+        items = data["data"]["items"]
+        if not items:
+            return [f"아이템 {item_id}을(를) 다시 조회하지 못했습니다."]
+
+        actual = {c["id"]: (c["text"] or "") for c in items[0]["column_values"]}
+        titles = {c["id"]: c["title"] for c in self.get_board_columns()}
+
+        mismatches = []
+        for col_id, expected in cv.items():
+            name = titles.get(col_id, col_id)
+            stored = actual.get(col_id)
+
+            if stored is None:
+                mismatches.append(f"{name}({col_id}): 보드에 없는 컬럼 — 기록되지 않음")
+                continue
+
+            if isinstance(expected, dict):
+                # date는 {"date": "..."}, status는 {"label": "..."} 형태
+                want = str(expected.get("label") or expected.get("date") or "")
+                if stored != want:
+                    mismatches.append(f"{name}({col_id}): 기대 {want!r} / 실제 {stored!r}")
+                continue
+
+            try:
+                ok = float(stored.replace(",", "")) == float(expected)
+            except ValueError:
+                ok = False
+            if not ok:
+                mismatches.append(f"{name}({col_id}): 기대 {expected!r} / 실제 {stored!r}")
+
+        return mismatches
+
     def get_status_label_maps(self) -> dict:
         """보드의 status(color) 컬럼별 실제 라벨 맵을 조회한다.
 
@@ -164,15 +284,7 @@ class MondayWriter:
         Returns:
             dict — { col_id: { lower_label: actual_label } }
         """
-        query = """
-        query ($boardId: [ID!]) {
-            boards(ids: $boardId) {
-                columns { id type settings_str }
-            }
-        }
-        """
-        data = self._execute_query(query, {"boardId": [self.board_id]})
-        columns = data["data"]["boards"][0]["columns"]
+        columns = self.get_board_columns()
 
         label_maps: dict = {}
         for c in columns:
@@ -209,7 +321,10 @@ class MondayWriter:
         """데이터를 Monday.com에 최종 작성한다."""
         item_name = week_calc.build_item_name(monday_date, sunday_date)
         group_title = week_calc.build_group_name(monday_date, sunday_date)
-        
+
+        # 0. 컬럼 ID 사전 검증 — 잘못된 ID는 기록 시 조용히 무시되므로 먼저 막는다
+        self.validate_column_ids()
+
         # 1. 그룹 확보
         group_id = self.get_or_create_group(group_title)
         
@@ -311,6 +426,7 @@ class MondayWriter:
             }
             res = self._execute_query(update_query, variables)
             updated_id = res["data"]["change_multiple_column_values"]["id"]
+            self._assert_written(updated_id, cv)
             self.logger.info(f"업데이트 완료! 아이템 ID: {updated_id}")
             return {"item_id": updated_id, "was_update": True}
 
@@ -334,5 +450,29 @@ class MondayWriter:
 
         res = self._execute_query(create_item_query, variables)
         new_id = res["data"]["create_item"]["id"]
+        self._assert_written(new_id, cv)
         self.logger.info(f"신규 작성 완료! 아이템 ID: {new_id}")
         return {"item_id": new_id, "was_update": False}
+
+    def _assert_written(self, item_id: str, cv: dict) -> None:
+        """기록 결과를 검증하고, 불일치가 있으면 예외를 발생시킨다.
+
+        Args:
+            item_id: 검증할 아이템 ID.
+            cv: 기록에 사용한 {컬럼ID: 값} 딕셔너리.
+
+        Raises:
+            Exception: 의도한 값과 실제 저장값이 다른 경우.
+                       (orchestrator가 잡아 실패 메일을 발송한다)
+        """
+        mismatches = self.verify_written_values(item_id, cv)
+        if not mismatches:
+            self.logger.info(f"기록 값 검증 통과 — {len(cv)}개 컬럼 모두 일치")
+            return
+
+        for m in mismatches:
+            self.logger.error(f"기록 값 불일치: {m}")
+        raise Exception(
+            f"Monday 기록 후 값 검증 실패 (아이템 {item_id}, {len(mismatches)}건): "
+            + " | ".join(mismatches)
+        )

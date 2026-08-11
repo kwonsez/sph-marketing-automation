@@ -69,34 +69,38 @@ def get_primary_month(monday_date: datetime, sunday_date: datetime) -> int:
 
 
 def get_week_of_month(monday_date: datetime, primary_month: int) -> int:
-    """해당 달에서 몇 번째 주인지 계산한다.
+    """해당 달에 '배정된' 주들 중 몇 번째 주인지 계산한다.
 
-    해당 월의 1일이 속한 주를 1주차로 하고,
-    이후 월요일 기준으로 주차를 카운트한다.
+    주차는 그 달에 배정된(=7일 중 과반이 속한) 주만 센다.
+    예: 2026년 7/27~8/02는 8월 1일을 포함하지만 7월 배정(7월 5주차)이므로,
+    8월의 첫 배정 주는 8/03~8/09 → "8월 1주차".
+    (보드 과거 데이터 관행과 일치: 2025년에도 7/28~8/03 = 7월 5주차,
+     8/04~8/10 = 8월 1주차)
 
     Args:
         monday_date: 해당 주 월요일.
-        primary_month: 기준 달.
+        primary_month: 기준 달 (get_primary_month 결과).
 
     Returns:
         주차 순서 (1, 2, 3, 4, 5)
     """
-    year = monday_date.year
-    # primary_month가 monday_date의 달과 다를 수 있음
-    # (예: 3/30 월요일인데 primary_month가 4월)
-    if monday_date.month != primary_month:
-        # 월요일이 이전 달에 속하면, primary_month 기준 1주차
-        return 1
+    # primary_month 소속 날짜를 찾아 그 달의 1일을 구한다
+    # (월요일이 이전 달 소속일 수 있음. 예: 3/30 월요일, primary_month=4월)
+    first_of_month = None
+    for i in range(7):
+        d = monday_date + timedelta(days=i)
+        if d.month == primary_month:
+            first_of_month = d.replace(day=1)
+            break
 
-    # 해당 월 1일의 월요일 찾기
-    first_of_month = monday_date.replace(day=1)
-    # 1일이 속한 주의 월요일
-    first_monday = first_of_month - timedelta(days=first_of_month.weekday())
-    if first_monday.month != primary_month and first_monday < first_of_month:
-        first_monday = first_monday  # 이전 달 월요일이라도 1주차
-
-    diff = (monday_date - first_monday).days // 7 + 1
-    return diff
+    # 1일이 속한 주의 월요일부터 걸어가며 primary_month 배정 주만 센다
+    cursor = first_of_month - timedelta(days=first_of_month.weekday())
+    count = 0
+    while cursor <= monday_date:
+        if get_primary_month(cursor, cursor + timedelta(days=6)) == primary_month:
+            count += 1
+        cursor += timedelta(days=7)
+    return count
 
 
 def build_item_name(monday_date: datetime, sunday_date: datetime) -> str:

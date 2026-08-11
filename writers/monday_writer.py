@@ -92,87 +92,99 @@ class MondayWriter:
         res = self._execute_query(create_query, {"boardId": self.board_id, "groupTitle": group_title})
         return res["data"]["create_group"]["id"]
 
-    def find_item_by_name(self, item_name: str) -> str | None:
-        """보드에서 동일 이름 아이템을 찾아 ID를 반환한다. 없으면 None.
+    def find_item_by_start_date(self, start_date: str) -> str | None:
+        """시작날짜 컬럼 값으로 해당 주 아이템을 찾아 ID를 반환한다. 없으면 None.
+
+        아이템명은 보드에서 수동으로 바뀔 수 있으므로 이름 대신
+        시작날짜(date) 컬럼으로 매칭한다. 이름이 바뀌어도 upsert와
+        전주대비 계산이 항상 동작한다.
 
         2개 이상 중복 존재 시: 가장 ID가 큰 (=가장 최근 생성된) 아이템을 반환한다.
         나머지 중복 아이템은 사용자가 수동으로 정리해야 한다.
+
+        Args:
+            start_date: 해당 주 월요일 "YYYY-MM-DD".
         """
         query = """
-        query ($boardId: [ID!]) {
+        query ($boardId: [ID!], $colId: [String!]) {
             boards(ids: $boardId) {
                 items_page (limit: 100) {
                     cursor
-                    items { id name }
+                    items { id column_values (ids: $colId) { text } }
                 }
             }
         }
         """
         next_q = """
-        query ($cursor: String!) {
+        query ($cursor: String!, $colId: [String!]) {
             next_items_page (limit: 100, cursor: $cursor) {
                 cursor
-                items { id name }
+                items { id column_values (ids: $colId) { text } }
             }
         }
         """
+        col_id = [self.config.col_start_date]
 
         matches: list[str] = []
-        data = self._execute_query(query, {"boardId": [self.board_id]})
+        data = self._execute_query(query, {"boardId": [self.board_id], "colId": col_id})
         page = data["data"]["boards"][0]["items_page"]
         while True:
             for it in page["items"]:
-                if it["name"] == item_name:
+                if any(c["text"] == start_date for c in it["column_values"]):
                     matches.append(it["id"])
             cursor = page.get("cursor")
             if not cursor:
                 break
-            data = self._execute_query(next_q, {"cursor": cursor})
+            data = self._execute_query(next_q, {"cursor": cursor, "colId": col_id})
             page = data["data"]["next_items_page"]
 
         if not matches:
             return None
         if len(matches) > 1:
             self.logger.warning(
-                f"동일 이름 아이템 {len(matches)}개 발견 ({item_name}). "
+                f"시작날짜 {start_date} 아이템 {len(matches)}개 발견. "
                 f"가장 최근 ID를 업데이트하고 나머지는 보존합니다. "
                 f"수동 정리 필요: {matches}"
             )
         # ID가 큰 것 = 가장 최근 생성
         return max(matches, key=lambda x: int(x))
 
-    def get_previous_week_values(self, prev_item_name: str) -> dict:
-        """전주 아이템을 찾아 비교에 필요한 값들을 가져온다."""
+    def get_previous_week_values(self, prev_start_date: str) -> dict:
+        """전주 아이템을 시작날짜로 찾아 비교에 필요한 값들을 가져온다.
+
+        Args:
+            prev_start_date: 전주 월요일 "YYYY-MM-DD".
+
+        Returns:
+            {컬럼ID: 숫자값} 딕셔너리. 전주 아이템이 없으면 빈 dict.
+        """
+        item_id = self.find_item_by_start_date(prev_start_date)
+        if not item_id:
+            self.logger.warning(
+                f"전주({prev_start_date}) 아이템을 찾지 못했습니다. "
+                f"전주대비 라벨은 빈 칸으로 남깁니다."
+            )
+            return {}
+
         query = """
-        query ($boardId: [ID!]) {
-            boards(ids: $boardId) {
-                items_page (limit: 100) {
-                    items {
-                        name
-                        column_values {
-                            id
-                            text
-                            value
-                        }
-                    }
-                }
+        query ($itemId: [ID!]) {
+            items (ids: $itemId) {
+                column_values { id text }
             }
         }
         """
-        data = self._execute_query(query, {"boardId": [self.board_id]})
-        items = data["data"]["boards"][0]["items_page"]["items"]
-        
+        data = self._execute_query(query, {"itemId": [item_id]})
+        items = data["data"]["items"]
+
         prev_data = {}
-        for item in items:
-            if item["name"] == prev_item_name:
-                for cv in item["column_values"]:
-                    # 텍스트 값을 숫자로 변환하여 저장
-                    val = cv["text"].replace(",", "") if cv["text"] else "0"
-                    try:
-                        prev_data[cv["id"]] = float(val)
-                    except ValueError:
-                        prev_data[cv["id"]] = 0
-                break
+        if items:
+            for cv in items[0]["column_values"]:
+                # 텍스트 값을 숫자로 변환하여 저장
+                val = cv["text"].replace(",", "") if cv["text"] else "0"
+                try:
+                    prev_data[cv["id"]] = float(val)
+                except ValueError:
+                    prev_data[cv["id"]] = 0
         return prev_data
 
     def get_board_columns(self) -> list[dict]:
@@ -328,11 +340,11 @@ class MondayWriter:
         # 1. 그룹 확보
         group_id = self.get_or_create_group(group_title)
         
-        # 2. 전주 데이터 조회 (WoW 계산용)
+        # 2. 전주 데이터 조회 (WoW 계산용) — 시작날짜로 매칭 (이름 변경에 무관)
         prev_monday = monday_date - week_calc.timedelta(days=7)
-        prev_sunday = sunday_date - week_calc.timedelta(days=7)
-        prev_item_name = week_calc.build_item_name(prev_monday, prev_sunday)
-        prev_values = self.get_previous_week_values(prev_item_name)
+        prev_values = self.get_previous_week_values(
+            week_calc.format_start_date(prev_monday)
+        )
         
         # 3. 컬럼 값 매핑 준비
         # collected_data에 키가 있고, config에 컬럼 ID가 비어있지 않을 때만 입력한다.
@@ -405,8 +417,11 @@ class MondayWriter:
         label_maps = self.get_status_label_maps()
         self._normalize_status_labels(cv, label_maps)
 
-        # 5. 동일 이름 아이템 검색 → 있으면 업데이트, 없으면 생성
-        existing_id = self.find_item_by_name(item_name)
+        # 5. 동일 시작날짜 아이템 검색 → 있으면 업데이트, 없으면 생성
+        # (이름이 수동으로 바뀌어도 같은 주 아이템을 정확히 찾는다)
+        existing_id = self.find_item_by_start_date(
+            week_calc.format_start_date(monday_date)
+        )
 
         if existing_id:
             self.logger.info(f"기존 아이템 발견 (ID: {existing_id}). 컬럼 값 업데이트 중: {item_name}")

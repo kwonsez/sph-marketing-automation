@@ -63,6 +63,7 @@ class NaverBlogCollector(BaseCollector):
             try:
                 post_count = self._count_posts(page, start_date, end_date)
                 view_count = self._get_views(page, start_date, end_date)
+                self._refresh_session(context)
             finally:
                 browser.close()
 
@@ -72,6 +73,28 @@ class NaverBlogCollector(BaseCollector):
             "n_blog_views": view_count,
             "n_blog_session_expired": self._session_expired,
         }
+
+    def _refresh_session(self, context) -> None:
+        """접속 중 네이버가 회전 발급한 쿠키(NID_SES 등)를 세션 파일에 다시 저장한다.
+
+        네이버 세션 쿠키는 유효한 상태로 접속할 때마다 새로 발급되므로,
+        매 실행 후 storage_state를 재저장하면 세션이 계속 연장된다.
+        (주 1회 실행 기준, 최초 로그인 한 번으로 사실상 무기한 유지)
+
+        세션이 이미 만료된 상태면 로그아웃된 쿠키로 파일을 덮어쓰지 않도록 건너뛴다.
+
+        Args:
+            context: Playwright BrowserContext 객체.
+        """
+        if self._session_expired:
+            self.logger.warning("세션이 만료 상태이므로 세션 파일 재저장을 건너뜁니다.")
+            return
+        try:
+            context.storage_state(path=self.session_path)
+            self.logger.info(f"네이버 세션 연장 저장 완료: {self.session_path}")
+        except Exception as e:
+            # 연장 실패는 치명적이지 않음 — 기존 세션 파일이 그대로 남는다.
+            self.logger.warning(f"세션 재저장 실패 (기존 세션 유지): {e}")
 
     def _count_posts(self, page, start_date: str, end_date: str) -> int:
         """#mainFrame iframe 내 목록 테이블에서 해당 기간의 포스팅 수를 센다.

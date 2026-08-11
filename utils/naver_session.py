@@ -20,7 +20,11 @@ from zoneinfo import ZoneInfo
 KST = ZoneInfo("Asia/Seoul")
 logger = logging.getLogger("naver_session")
 
-REFRESH_HINT = "`python tools/save_naver_session.py`로 세션을 재발급하세요."
+REFRESH_HINT = (
+    "`python tools/save_naver_session.py`로 세션을 재발급한 뒤, "
+    "새 naver_session.json 내용으로 GitHub Secret `NAVER_SESSION_JSON`을 갱신하세요. "
+    "(Secret을 갱신하면 이전 캐시는 자동으로 무시됩니다)"
+)
 
 
 @dataclass

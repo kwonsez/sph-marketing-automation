@@ -107,17 +107,14 @@ class Orchestrator:
                     self.notifier.notify_failure(f"{tag} {week_name}", err_msg)
                 return result
 
-        # 네이버 블로그 프로필이면 세션 만료 임박/만료를 점검해 경고 문구를 만든다.
-        # (a) 수집 중 실제 만료 감지, (b) 사전 점검(파일 만료일/경과일) 둘 다 반영.
+        # 네이버 세션 경고는 실제로 만료되어 조회수 수집에 실패했을 때만 발송한다.
+        # 세션은 매 실행마다 자동 연장되므로(collector가 storage_state 재저장 +
+        # Actions cache 승계), 만료 임박 사전 경고는 더 이상 보내지 않는다.
         collector_expired = all_data.pop("n_blog_session_expired", False)
-        if self.profile.use_naver_blog:
-            health = naver_session.check_session_health()
-            if collector_expired:
-                result["session_warning"] = (
-                    f"네이버 세션이 만료되어 블로그 조회수를 수집하지 못했습니다. {naver_session.REFRESH_HINT}"
-                )
-            elif health.needs_attention:
-                result["session_warning"] = health.message
+        if self.profile.use_naver_blog and collector_expired:
+            result["session_warning"] = (
+                f"네이버 세션이 만료되어 블로그 조회수를 수집하지 못했습니다. {naver_session.REFRESH_HINT}"
+            )
 
         result["data"] = all_data
 
